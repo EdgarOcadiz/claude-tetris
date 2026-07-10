@@ -4,6 +4,10 @@
   padding: 0;
 }
 
+.hidden {
+  display: none !important;
+}
+
 :root {
   --bg: #0f0f17;
   --fg: #e0e0e0;
@@ -206,8 +210,14 @@ kbd {
   color: var(--value-color);
 }
 
-#restart-btn {
+.overlay-actions {
+  display: flex;
+  gap: 10px;
   margin-top: 8px;
+}
+
+#retry-btn,
+#menu-btn {
   background: var(--btn-bg);
   color: var(--btn-color);
   border: none;
@@ -220,6 +230,86 @@ kbd {
   transition: background 0.15s;
 }
 
-#restart-btn:hover {
+#retry-btn:hover,
+#menu-btn:hover {
   background: var(--btn-hover-bg);
+}
+
+.challenge-win #overlay-title {
+  color: #66bb6a;
+}
+
+.challenge-fail #overlay-title {
+  color: var(--overlay-title-color);
+}
+
+/* ---- Selección de modo ---- */
+.mode-box {
+  min-width: 280px;
+}
+
+.overlay-title-alt {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: 4px;
+  color: var(--title-color);
+}
+
+.mode-select,
+.challenge-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.mode-btn,
+.challenge-btn,
+.back-btn {
+  background: var(--btn-bg);
+  color: var(--btn-color);
+  border: none;
+  border-radius: 6px;
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+  transition: background 0.15s;
+}
+
+.mode-btn:hover,
+.challenge-btn:hover,
+.back-btn:hover {
+  background: var(--btn-hover-bg);
+}
+
+.challenge-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  text-align: left;
+}
+
+.challenge-btn .challenge-name {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.challenge-btn .challenge-desc {
+  font-size: 11px;
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+.back-btn {
+  margin-top: 4px;
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  color: var(--fg);
+}
+
+.back-btn:hover {
+  background: var(--panel-bg);
 }

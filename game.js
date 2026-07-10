@@ -23,6 +23,7 @@ const COLORS = [
   '#e040fb', // Tinte - magenta pastel
   '#8d6e63', // Gravedad - marrón
   '#80deea', // Congelar - celeste hielo
+  '#616161', // Basura (desafío)
 ];
 
 const PIECES = [
@@ -63,6 +64,42 @@ const FREEZE_DURATION = 5000;
 
 const LINE_SCORES = [0, 100, 300, 500, 800];
 
+const GARBAGE_COLOR_INDEX = 18;
+
+const CHALLENGES = [
+  {
+    id: 'lines40',
+    name: 'Cuenta atrás',
+    desc: 'Limpia 40 líneas en 2 minutos',
+    targetLines: 40,
+    timeLimitMs: 120000,
+  },
+  {
+    id: 'garbage',
+    name: 'Basura ascendente',
+    desc: 'Sobrevive mientras sube basura desde abajo cada 10s',
+    garbageIntervalMs: 10000,
+  },
+  {
+    id: 'preplaced',
+    name: 'Terreno accidentado',
+    desc: 'Empieza con bloques fijos ya colocados',
+    prePlacedBoardFn: () => buildPreplacedBoard(),
+  },
+  {
+    id: 'invisible',
+    name: 'Piezas fantasma',
+    desc: 'Las piezas se vuelven invisibles al acercarse al suelo',
+    invisibleLookaheadRows: 5,
+  },
+  {
+    id: 'reverseRotation',
+    name: 'Rotación inversa',
+    desc: 'A partir del nivel 3 la rotación se invierte',
+    reverseRotationLevel: 3,
+  },
+];
+
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
 const nextCanvas = document.getElementById('next-canvas');
@@ -73,13 +110,23 @@ const levelEl = document.getElementById('level');
 const overlay = document.getElementById('overlay');
 const overlayTitle = document.getElementById('overlay-title');
 const overlayScore = document.getElementById('overlay-score');
-const restartBtn = document.getElementById('restart-btn');
+const retryBtn = document.getElementById('retry-btn');
+const menuBtn = document.getElementById('menu-btn');
 const themeToggleBtn = document.getElementById('theme-toggle');
+const modeOverlay = document.getElementById('mode-overlay');
+const modeSelectEl = document.getElementById('mode-select');
+const challengeSelectEl = document.getElementById('challenge-select');
+const challengeListEl = document.getElementById('challenge-list');
+const modeBackBtn = document.getElementById('mode-back-btn');
+const challengeHudEl = document.getElementById('challenge-hud');
+const challengeHudLabelEl = document.getElementById('challenge-hud-label');
+const challengeHudValueEl = document.getElementById('challenge-hud-value');
 
 const THEME_KEY = 'tetris-theme';
 
 let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId, rewardPending;
 let powerupPending, linesSincePowerup, freezeUntil;
+let challenge = null;
 
 function applyTheme(theme) {
   document.body.dataset.theme = theme;
@@ -99,6 +146,23 @@ function initTheme() {
 
 function createBoard() {
   return Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
+}
+
+function buildPreplacedBoard() {
+  const b = createBoard();
+  // Layout fijo, alineado al fondo; sin filas completas y con margen superior libre.
+  const layout = [
+    '..........',
+    '..3.....4.',
+    '.33....44.',
+    '333..5.444',
+    '3.3.55.4.4',
+  ];
+  layout.forEach((rowStr, i) => {
+    const r = ROWS - layout.length + i;
+    [...rowStr].forEach((ch, c) => { if (ch !== '.') b[r][c] = Number(ch); });
+  });
+  return b;
 }
 
 function createPiece(type) {
@@ -139,8 +203,18 @@ function rotateCW(shape) {
   return result;
 }
 
+function rotateCCW(shape) {
+  const rows = shape.length, cols = shape[0].length;
+  const result = Array.from({ length: cols }, () => new Array(rows).fill(0));
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < cols; c++)
+      result[cols - 1 - c][r] = shape[r][c];
+  return result;
+}
+
 function tryRotate() {
-  const rotated = rotateCW(current.shape);
+  const reversed = challenge && challenge.reverseRotationLevel && level >= challenge.reverseRotationLevel;
+  const rotated = reversed ? rotateCCW(current.shape) : rotateCW(current.shape);
   const kicks = [0, -1, 1, -2, 2];
   for (const kick of kicks) {
     if (!collide(rotated, current.x + kick, current.y)) {
@@ -180,6 +254,18 @@ function clearLines() {
       powerupPending = true;
     }
     updateHUD();
+  }
+}
+
+function injectGarbageRow() {
+  board.shift();
+  const gapCol = Math.floor(Math.random() * COLS);
+  const garbage = new Array(COLS).fill(GARBAGE_COLOR_INDEX);
+  garbage[gapCol] = 0;
+  board.push(garbage);
+  current.y -= 1;
+  if (collide(current.shape, current.x, current.y)) {
+    endGame();
   }
 }
 
@@ -253,6 +339,14 @@ function ghostY() {
   return gy;
 }
 
+function isAtLockPosition() {
+  return collide(current.shape, current.x, current.y + 1);
+}
+
+function rowsUntilLock() {
+  return ghostY() - current.y;
+}
+
 function hardDrop() {
   const gy = ghostY();
   score += (gy - current.y) * 2;
@@ -291,7 +385,11 @@ function spawn() {
     powerupPending = false;
   }
   if (collide(current.shape, current.x, current.y)) {
-    endGame();
+    if (challenge && challenge.timeLimitMs) {
+      endChallenge(false);
+    } else {
+      endGame();
+    }
   }
   drawNext();
 }
@@ -300,6 +398,26 @@ function updateHUD() {
   scoreEl.textContent = score.toLocaleString();
   linesEl.textContent = lines;
   levelEl.textContent = level;
+  updateChallengeHUD();
+}
+
+function formatTime(ms) {
+  const totalSec = Math.max(0, Math.ceil(ms / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function updateChallengeHUD() {
+  if (!challenge) return;
+  if (challenge.targetLines) {
+    const remaining = challenge.timeLimitMs - (challenge.elapsedMs || 0);
+    challengeHudValueEl.textContent = `${lines}/${challenge.targetLines} · ${formatTime(remaining)}`;
+  } else if (challenge.garbageIntervalMs) {
+    challengeHudValueEl.textContent = formatTime(challenge.elapsedMs || 0);
+  } else {
+    challengeHudValueEl.textContent = challenge.name;
+  }
 }
 
 function drawBlock(context, x, y, colorIndex, size, alpha) {
@@ -347,17 +465,24 @@ function draw() {
     for (let c = 0; c < COLS; c++)
       drawBlock(ctx, c, r, board[r][c], BLOCK);
 
+  const invisibleMode = challenge && challenge.invisibleLookaheadRows;
+
   // ghost
-  const gy = ghostY();
-  for (let r = 0; r < current.shape.length; r++)
-    for (let c = 0; c < current.shape[r].length; c++)
-      if (current.shape[r][c])
-        drawBlock(ctx, current.x + c, gy + r, current.shape[r][c], BLOCK, 0.2);
+  if (!invisibleMode) {
+    const gy = ghostY();
+    for (let r = 0; r < current.shape.length; r++)
+      for (let c = 0; c < current.shape[r].length; c++)
+        if (current.shape[r][c])
+          drawBlock(ctx, current.x + c, gy + r, current.shape[r][c], BLOCK, 0.2);
+  }
 
   // current piece
-  for (let r = 0; r < current.shape.length; r++)
-    for (let c = 0; c < current.shape[r].length; c++)
-      drawBlock(ctx, current.x + c, current.y + r, current.shape[r][c], BLOCK);
+  const hideCurrent = invisibleMode && rowsUntilLock() <= challenge.invisibleLookaheadRows;
+  if (!hideCurrent) {
+    for (let r = 0; r < current.shape.length; r++)
+      for (let c = 0; c < current.shape[r].length; c++)
+        drawBlock(ctx, current.x + c, current.y + r, current.shape[r][c], BLOCK);
+  }
 
   if (freezeUntil && performance.now() < freezeUntil) {
     ctx.save();
@@ -384,8 +509,23 @@ function drawNext() {
 function endGame() {
   gameOver = true;
   cancelAnimationFrame(animId);
+  overlay.classList.remove('challenge-win', 'challenge-fail');
   overlayTitle.textContent = 'GAME OVER';
   overlayScore.textContent = `Puntuación: ${score.toLocaleString()}`;
+  retryBtn.textContent = 'Reiniciar';
+  menuBtn.classList.toggle('hidden', !challenge);
+  overlay.classList.remove('hidden');
+}
+
+function endChallenge(won) {
+  gameOver = true;
+  cancelAnimationFrame(animId);
+  overlay.classList.toggle('challenge-win', won);
+  overlay.classList.toggle('challenge-fail', !won);
+  overlayTitle.textContent = won ? '¡Desafío superado!' : 'Desafío fallido';
+  overlayScore.textContent = `Puntuación: ${score.toLocaleString()} · Líneas: ${lines}`;
+  retryBtn.textContent = 'Reintentar';
+  menuBtn.classList.remove('hidden');
   overlay.classList.remove('hidden');
 }
 
@@ -393,12 +533,16 @@ function togglePause() {
   if (gameOver) return;
   paused = !paused;
   if (!paused) {
+    overlay.classList.add('hidden');
     lastTime = performance.now();
     loop(lastTime);
   } else {
     cancelAnimationFrame(animId);
+    overlay.classList.remove('challenge-win', 'challenge-fail');
     overlayTitle.textContent = 'PAUSA';
     overlayScore.textContent = '';
+    retryBtn.textContent = 'Reiniciar';
+    menuBtn.classList.toggle('hidden', !challenge);
     overlay.classList.remove('hidden');
   }
 }
@@ -418,13 +562,35 @@ function loop(ts) {
       }
     }
   }
+  if (challenge && !gameOver) {
+    challenge.elapsedMs = (challenge.elapsedMs || 0) + dt;
+    updateChallengeHUD();
+
+    if (challenge.targetLines && lines >= challenge.targetLines) {
+      endChallenge(true);
+      draw();
+      return;
+    }
+    if (challenge.timeLimitMs && challenge.elapsedMs >= challenge.timeLimitMs) {
+      endChallenge(false);
+      draw();
+      return;
+    }
+    if (challenge.garbageIntervalMs) {
+      challenge.garbageAccumMs = (challenge.garbageAccumMs || 0) + dt;
+      if (challenge.garbageAccumMs >= challenge.garbageIntervalMs) {
+        challenge.garbageAccumMs -= challenge.garbageIntervalMs;
+        injectGarbageRow();
+      }
+    }
+  }
   draw();
   if (gameOver) return;
   animId = requestAnimationFrame(loop);
 }
 
 function init() {
-  board = createBoard();
+  board = (challenge && challenge.prePlacedBoardFn) ? challenge.prePlacedBoardFn() : createBoard();
   score = 0;
   lines = 0;
   level = 1;
@@ -436,16 +602,30 @@ function init() {
   powerupPending = false;
   linesSincePowerup = 0;
   freezeUntil = 0;
+  if (challenge) {
+    challenge.elapsedMs = 0;
+    challenge.garbageAccumMs = 0;
+  }
   lastTime = performance.now();
   next = randomPiece();
   spawn();
   updateHUD();
+  challengeHudEl.classList.toggle('hidden', !challenge);
+  if (challenge) {
+    challengeHudLabelEl.textContent = challenge.targetLines
+      ? 'TIEMPO'
+      : challenge.garbageIntervalMs
+      ? 'SUPERVIVENCIA'
+      : 'DESAFÍO';
+  }
+  overlay.classList.remove('challenge-win', 'challenge-fail');
   overlay.classList.add('hidden');
   cancelAnimationFrame(animId);
   animId = requestAnimationFrame(loop);
 }
 
 document.addEventListener('keydown', e => {
+  if (!current) return;
   if (e.code === 'KeyP') { togglePause(); return; }
   if (paused || gameOver) return;
   switch (e.code) {
@@ -470,8 +650,55 @@ document.addEventListener('keydown', e => {
   updateHUD();
 });
 
-restartBtn.addEventListener('click', init);
+function showModeOverlay() {
+  cancelAnimationFrame(animId);
+  gameOver = true;
+  overlay.classList.add('hidden');
+  modeSelectEl.classList.remove('hidden');
+  challengeSelectEl.classList.add('hidden');
+  modeOverlay.classList.remove('hidden');
+}
+
+function renderChallengeList() {
+  challengeListEl.innerHTML = '';
+  CHALLENGES.forEach((c, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'challenge-btn';
+    btn.dataset.index = i;
+    btn.innerHTML = `<span class="challenge-name">${c.name}</span><span class="challenge-desc">${c.desc}</span>`;
+    challengeListEl.appendChild(btn);
+  });
+}
+
+modeSelectEl.addEventListener('click', e => {
+  const btn = e.target.closest('.mode-btn');
+  if (!btn) return;
+  if (btn.dataset.mode === 'classic') {
+    challenge = null;
+    modeOverlay.classList.add('hidden');
+    init();
+  } else {
+    renderChallengeList();
+    modeSelectEl.classList.add('hidden');
+    challengeSelectEl.classList.remove('hidden');
+  }
+});
+
+challengeListEl.addEventListener('click', e => {
+  const btn = e.target.closest('.challenge-btn');
+  if (!btn) return;
+  challenge = { ...CHALLENGES[Number(btn.dataset.index)] };
+  modeOverlay.classList.add('hidden');
+  init();
+});
+
+modeBackBtn.addEventListener('click', () => {
+  challengeSelectEl.classList.add('hidden');
+  modeSelectEl.classList.remove('hidden');
+});
+
+retryBtn.addEventListener('click', init);
+menuBtn.addEventListener('click', showModeOverlay);
 themeToggleBtn.addEventListener('click', toggleTheme);
 
 initTheme();
-init();

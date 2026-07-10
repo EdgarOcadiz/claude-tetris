@@ -29,6 +29,11 @@
           <span class="value" id="level">1</span>
         </div>
 
+        <div class="panel-section hidden" id="challenge-hud">
+          <span class="label" id="challenge-hud-label">DESAFÍO</span>
+          <span class="value" id="challenge-hud-value">--</span>
+        </div>
+
         <div class="panel-section">
           <span class="label">NEXT</span>
           <canvas id="next-canvas" width="120" height="120"></canvas>
@@ -51,7 +56,24 @@
       <div class="overlay-box">
         <p id="overlay-title">GAME OVER</p>
         <p id="overlay-score"></p>
-        <button id="restart-btn">Reiniciar</button>
+        <div class="overlay-actions">
+          <button id="retry-btn">Reiniciar</button>
+          <button id="menu-btn" class="hidden">Menú</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="mode-overlay" class="overlay">
+      <div class="overlay-box mode-box">
+        <p class="overlay-title-alt">TETRIS</p>
+        <div id="mode-select" class="mode-select">
+          <button class="mode-btn" data-mode="classic">Modo Clásico</button>
+          <button class="mode-btn" data-mode="challenge">Modo Desafío</button>
+        </div>
+        <div id="challenge-select" class="challenge-select hidden">
+          <div id="challenge-list" class="challenge-list"></div>
+          <button id="mode-back-btn" class="back-btn">← Volver</button>
+        </div>
       </div>
     </div>
   </div>
